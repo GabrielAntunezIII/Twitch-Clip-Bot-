@@ -10,6 +10,8 @@ TWITCH_BROADCASTER_ID = os.environ["TWITCH_BROADCASTER_ID"]
 TWITCH_CHANNEL = os.environ["TWITCH_CHANNEL"]
 
 # Hype detection tuning
-HYPE_WINDOW_SECONDS = 10       # rolling window to count messages
-HYPE_SPIKE_THRESHOLD = 20      # messages in window to trigger clip
-HYPE_COOLDOWN_SECONDS = 60     # minimum gap between clips
+HYPE_WINDOW_SECONDS = 10        # rolling window for message rate + keyword scores
+HYPE_RATE_THRESHOLD = 20        # raw message count in window to trigger
+HYPE_SCORE_THRESHOLD = 15       # weighted keyword score in window to trigger
+HYPE_COOLDOWN_SECONDS = 60      # minimum gap between clips
+EVENTSUB_KEEPALIVE_BUFFER = 10  # extra seconds before declaring keepalive timeout
