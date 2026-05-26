@@ -43,3 +43,7 @@ TIKTOK_CAPTION_TEMPLATE = os.environ.get(
     "TIKTOK_CAPTION_TEMPLATE", "🔥 {channel} on stream! {hashtags}"
 )
 TIKTOK_HEADLESS = os.environ.get("TIKTOK_HEADLESS", "false").lower() == "true"
+
+# AI validation
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+AI_RECENT_MSG_COUNT = int(os.environ.get("AI_RECENT_MSG_COUNT", "40"))

@@ -6,3 +6,4 @@ websockets
 httpx
 python-dotenv
 cryptography
+anthropic

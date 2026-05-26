@@ -35,7 +35,7 @@ class HypeEvent:
     timestamp: float      # monotonic time
 
 
-HypeCallback = Callable[[HypeEvent], Awaitable[None] | None]
+HypeCallback = Callable[["HypeEvent", list[str]], Awaitable[None] | None]
 
 
 class ChatMonitor:
@@ -43,6 +43,7 @@ class ChatMonitor:
         self._on_hype_spike = on_hype_spike
         self._message_times: deque[float] = deque()
         self._keyword_scores: deque[tuple[float, int]] = deque()  # (time, score)
+        self._recent_messages: deque[str] = deque(maxlen=config.AI_RECENT_MSG_COUNT)
         self._last_clip_time: float = 0.0
         self._session_id: str | None = None
         self._bot_user_id: str | None = None
@@ -53,6 +54,8 @@ class ChatMonitor:
     def _record_message(self, text: str) -> None:
         now = time.monotonic()
         self._message_times.append(now)
+        if text:
+            self._recent_messages.append(text)
 
         score = self._score_message(text)
         if score:
@@ -72,7 +75,7 @@ class ChatMonitor:
             trigger = "score"
 
         if trigger:
-            self._maybe_trigger(HypeEvent(trigger, count, total_score, now))
+            self._maybe_trigger(HypeEvent(trigger, count, total_score, now), list(self._recent_messages))
 
     def _prune_window(self, now: float) -> None:
         cutoff = now - config.HYPE_WINDOW_SECONDS
@@ -89,7 +92,7 @@ class ChatMonitor:
             default=0,
         )
 
-    def _maybe_trigger(self, event: HypeEvent) -> None:
+    def _maybe_trigger(self, event: HypeEvent, recent_messages: list[str]) -> None:
         if event.timestamp - self._last_clip_time < config.HYPE_COOLDOWN_SECONDS:
             return
         self._last_clip_time = event.timestamp
@@ -97,7 +100,7 @@ class ChatMonitor:
             "Hype spike! trigger=%s msgs=%d score=%d",
             event.trigger, event.message_count, event.keyword_score,
         )
-        result = self._on_hype_spike(event)
+        result = self._on_hype_spike(event, recent_messages)
         if asyncio.iscoroutine(result):
             asyncio.ensure_future(result)
 

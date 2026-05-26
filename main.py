@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from bot.ai.validator import ClipValidator
 from bot.capture.stream_capture import StreamCapture
 from bot.process.video_processor import VideoProcessor
 from bot.twitch.chat_monitor import ChatMonitor, HypeEvent
@@ -14,15 +15,29 @@ async def main() -> None:
     capture = StreamCapture()
     processor = VideoProcessor()
     uploader = TikTokUploader()
+    validator = ClipValidator()
 
     await capture.start()
     await uploader.start()
 
-    async def on_hype_spike(event: HypeEvent) -> None:
+    async def on_hype_spike(event: HypeEvent, recent_messages: list[str]) -> None:
         logger.info(
-            "Hype spike! trigger=%s msgs=%d score=%d — clipping",
+            "Hype spike! trigger=%s msgs=%d score=%d — validating with AI",
             event.trigger, event.message_count, event.keyword_score,
         )
+
+        result = await validator.validate(
+            trigger=event.trigger,
+            message_count=event.message_count,
+            keyword_score=event.keyword_score,
+            recent_messages=recent_messages,
+        )
+        logger.info(
+            "AI validation: worth_clipping=%s confidence=%.2f reason=%s",
+            result.worth_clipping, result.confidence, result.reason,
+        )
+        if not result.worth_clipping:
+            return
 
         raw_clip = await capture.clip()
         if not raw_clip:
