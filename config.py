@@ -33,3 +33,13 @@ BLUR_RADIUS = 30                # background blur strength
 CAPTION_FONT = "Arial Black"
 CAPTION_SIZE = 88               # pt at 1080x1920
 CAPTION_MARGIN_BOTTOM = 180     # px from bottom of frame
+
+# TikTok upload
+TIKTOK_EMAIL = os.environ["TIKTOK_EMAIL"]
+TIKTOK_PASSWORD = os.environ["TIKTOK_PASSWORD"]
+TIKTOK_SESSION_FILE = os.environ.get("TIKTOK_SESSION_FILE", "tiktok_session.json")
+TIKTOK_HASHTAGS = os.environ.get("TIKTOK_HASHTAGS", "#twitch #gaming #clip #fyp")
+TIKTOK_CAPTION_TEMPLATE = os.environ.get(
+    "TIKTOK_CAPTION_TEMPLATE", "🔥 {channel} on stream! {hashtags}"
+)
+TIKTOK_HEADLESS = os.environ.get("TIKTOK_HEADLESS", "false").lower() == "true"
