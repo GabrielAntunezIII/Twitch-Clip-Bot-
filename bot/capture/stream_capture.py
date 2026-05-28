@@ -118,14 +118,19 @@ class StreamCapture:
             return await self._concat_segments(segments)
 
     def _segments_for_duration(self, duration: float) -> list[Path]:
-        """Return the most-recent segments covering at least `duration` seconds."""
+        """Return the most-recent segments covering at least `duration` seconds.
+
+        The newest segment is excluded because ffmpeg is likely still writing to
+        it; including a partial .ts corrupts the concat output.
+        """
         now = time.monotonic()
         cutoff = now - duration
-        return [
+        candidates = [
             path
             for recorded_at, path in self._segments
             if recorded_at >= cutoff and path.exists()
         ]
+        return candidates[:-1] if len(candidates) > 1 else candidates
 
     async def _concat_segments(self, segments: list[Path]) -> Path | None:
         concat_list = self._segment_dir / "concat.txt"

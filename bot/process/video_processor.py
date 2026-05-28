@@ -117,6 +117,8 @@ async def _render(
 
     filter_complex = f"{bg};{fg};{video_filter}"
 
+    tmp = out.with_suffix(".tmp.mp4")
+
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
         "-i", str(raw),
@@ -128,7 +130,7 @@ async def _render(
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
-        "-y", str(out),
+        "-y", str(tmp),
     ]
 
     proc = await asyncio.create_subprocess_exec(
@@ -139,8 +141,10 @@ async def _render(
 
     if proc.returncode != 0:
         logger.error("ffmpeg render failed:\n%s", stderr.decode().strip())
+        tmp.unlink(missing_ok=True)
         return False
 
+    tmp.rename(out)
     logger.info("Rendered: %s (%.1f MB)", out.name, out.stat().st_size / 1e6)
     return True
 
