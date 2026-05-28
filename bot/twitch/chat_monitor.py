@@ -47,6 +47,7 @@ class ChatMonitor:
     # ── Hype detection ────────────────────────────────────────────────────────
 
     def _record_message(self, text: str) -> None:
+        logger.info("chat: %s", text)
         now = time.monotonic()
         self._message_times.append(now)
         if text:
@@ -135,24 +136,39 @@ class ChatMonitor:
 
             async for raw in ws:
                 for line in raw.strip().split("\r\n"):
-                    await self._handle_line(ws, line)
+                    if line:
+                        logger.debug("< %s", line)
+                        if await self._handle_line(ws, line):
+                            return  # reconnect requested
 
-    async def _handle_line(self, ws, line: str) -> None:
-        if line.startswith("PING"):
-            await ws.send("PONG :tmi.twitch.tv")
-            return
-
-        # Strip IRCv3 tags if present
+    async def _handle_line(self, ws, line: str) -> bool:
+        """Handle one IRC line. Returns True if the caller should reconnect."""
+        # Strip IRCv3 tags first so all checks below work on the plain IRC line
         if line.startswith("@"):
             _, _, line = line.partition(" ")
 
+        if line.startswith("PING"):
+            pong = line.replace("PING", "PONG", 1)
+            await ws.send(pong)
+            logger.debug("> %s", pong)
+            return False
+
+        if " NOTICE " in line:
+            logger.warning("Twitch NOTICE: %s", line)
+            return False
+
+        if " RECONNECT" in line:
+            logger.warning("Twitch requested reconnect")
+            return True
+
         # :user!user@user.tmi.twitch.tv PRIVMSG #channel :message text
         if " PRIVMSG " not in line:
-            return
+            return False
 
         _, _, rest = line.partition(" PRIVMSG ")
         _, _, text = rest.partition(" :")
         self._record_message(text)
+        return False
 
     @staticmethod
     def _ensure_valid_token() -> None:

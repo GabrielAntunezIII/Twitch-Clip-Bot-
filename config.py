@@ -11,9 +11,9 @@ TWITCH_CHANNEL = os.environ["TWITCH_CHANNEL"]
 
 # Hype detection tuning
 HYPE_WINDOW_SECONDS = 10        # rolling window for message rate + keyword scores
-HYPE_RATE_THRESHOLD = 20        # raw message count in window to trigger
-HYPE_SCORE_THRESHOLD = 15       # weighted keyword score in window to trigger
-HYPE_COOLDOWN_SECONDS = 60      # minimum gap between clips
+HYPE_RATE_THRESHOLD = 1         # raw message count in window to trigger
+HYPE_SCORE_THRESHOLD = 1        # weighted keyword score in window to trigger
+HYPE_COOLDOWN_SECONDS = 10      # minimum gap between clips
 EVENTSUB_KEEPALIVE_BUFFER = 10  # extra seconds before declaring keepalive timeout
 
 # Stream capture

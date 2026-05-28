@@ -32,7 +32,7 @@ AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize"
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 VALIDATE_URL = "https://id.twitch.tv/oauth2/validate"
 REDIRECT_URI = "https://localhost:3000/callback"
-SCOPES = ["user:read:chat"]
+SCOPES = ["chat:read"]
 
 ENV_PATH = Path(__file__).parents[2] / ".env"
 
