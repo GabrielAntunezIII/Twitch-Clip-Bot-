@@ -126,7 +126,7 @@ class ChatMonitor:
                 await asyncio.sleep(5)
 
     async def _connect(self, bot_login: str, channel: str) -> None:
-        async with websockets.connect(IRC_WS_URL) as ws:
+        async with websockets.connect(IRC_WS_URL, ping_interval=None) as ws:
             logger.info("Connected to %s as %s, joining #%s", IRC_WS_URL, bot_login, channel)
             await ws.send("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands")
             await ws.send(f"PASS oauth:{config.TWITCH_ACCESS_TOKEN}")
