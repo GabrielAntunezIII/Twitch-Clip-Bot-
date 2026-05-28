@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from dataclasses import dataclass
 
 import anthropic
@@ -76,8 +78,9 @@ class ClipValidator:
             return ValidationResult(worth_clipping=True, confidence=0.5, reason="validation unavailable")
 
         raw = response.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
         try:
-            import json
             data = json.loads(raw)
             return ValidationResult(
                 worth_clipping=bool(data["worth_clipping"]),
