@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import time
@@ -15,8 +14,7 @@ from bot.twitch.auth import refresh_access_token, validate_token
 
 logger = logging.getLogger(__name__)
 
-EVENTSUB_WS_URL = "wss://eventsub.twitch.tv/ws"
-EVENTSUB_API_URL = "https://api.twitch.tv/helix/eventsub/subscriptions"
+IRC_WS_URL = "wss://irc-ws.chat.twitch.tv:443"
 
 # Weighted keyword scores — higher = stronger hype signal
 _KEYWORD_SCORES: dict[str, int] = {
@@ -45,9 +43,6 @@ class ChatMonitor:
         self._keyword_scores: deque[tuple[float, int]] = deque()  # (time, score)
         self._recent_messages: deque[str] = deque(maxlen=config.AI_RECENT_MSG_COUNT)
         self._last_clip_time: float = 0.0
-        self._session_id: str | None = None
-        self._bot_user_id: str | None = None
-        self._keepalive_timeout: int = 10
 
     # ── Hype detection ────────────────────────────────────────────────────────
 
@@ -104,9 +99,9 @@ class ChatMonitor:
         if asyncio.iscoroutine(result):
             asyncio.ensure_future(result)
 
-    # ── EventSub subscription ─────────────────────────────────────────────────
+    # ── IRC connection ────────────────────────────────────────────────────────
 
-    async def _fetch_bot_user_id(self) -> str:
+    async def _fetch_bot_login(self) -> str:
         async with httpx.AsyncClient() as client:
             r = await client.get(
                 "https://api.twitch.tv/helix/users",
@@ -116,95 +111,48 @@ class ChatMonitor:
                 },
             )
             r.raise_for_status()
-            return r.json()["data"][0]["id"]
-
-    async def _subscribe(self, session_id: str) -> None:
-        if not self._bot_user_id:
-            self._bot_user_id = await self._fetch_bot_user_id()
-
-        headers = {
-            "Authorization": f"Bearer {config.TWITCH_ACCESS_TOKEN}",
-            "Client-Id": config.TWITCH_CLIENT_ID,
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "type": "channel.chat.message",
-            "version": "1",
-            "condition": {
-                "broadcaster_user_id": config.TWITCH_BROADCASTER_ID,
-                "user_id": self._bot_user_id,
-            },
-            "transport": {"method": "websocket", "session_id": session_id},
-        }
-        async with httpx.AsyncClient() as client:
-            r = await client.post(EVENTSUB_API_URL, headers=headers, json=payload)
-            r.raise_for_status()
-            logger.info("Subscribed to channel.chat.message as user %s", self._bot_user_id)
-
-    # ── Connection lifecycle ──────────────────────────────────────────────────
+            return r.json()["data"][0]["login"]
 
     async def run(self) -> None:
         self._ensure_valid_token()
-        url = EVENTSUB_WS_URL
+        bot_login = await self._fetch_bot_login()
+        channel = config.TWITCH_CHANNEL.lstrip("#").lower()
+
         while True:
             try:
-                url = await self._connect(url)
+                await self._connect(bot_login, channel)
             except Exception as exc:
-                logger.warning("WebSocket error: %s — reconnecting in 5s", exc)
-                url = EVENTSUB_WS_URL
+                logger.warning("IRC WebSocket error: %s — reconnecting in 5s", exc)
                 await asyncio.sleep(5)
 
-    async def _connect(self, url: str) -> str:
-        """Connect to EventSub WebSocket. Returns a new URL if Twitch requests a reconnect."""
-        async with websockets.connect(url) as ws:
-            logger.info("Connected to %s", url)
-            reconnect_url: str | None = None
+    async def _connect(self, bot_login: str, channel: str) -> None:
+        async with websockets.connect(IRC_WS_URL) as ws:
+            logger.info("Connected to %s as %s, joining #%s", IRC_WS_URL, bot_login, channel)
+            await ws.send("CAP REQ :twitch.tv/membership twitch.tv/tags twitch.tv/commands")
+            await ws.send(f"PASS oauth:{config.TWITCH_ACCESS_TOKEN}")
+            await ws.send(f"NICK {bot_login}")
+            await ws.send(f"JOIN #{channel}")
 
-            async def _read():
-                nonlocal reconnect_url
-                async for raw in ws:
-                    result = await self._handle(json.loads(raw))
-                    if result:
-                        reconnect_url = result
-                        return
+            async for raw in ws:
+                for line in raw.strip().split("\r\n"):
+                    await self._handle_line(ws, line)
 
-            keepalive_deadline = time.monotonic() + self._keepalive_timeout + config.EVENTSUB_KEEPALIVE_BUFFER
-            read_task = asyncio.ensure_future(_read())
+    async def _handle_line(self, ws, line: str) -> None:
+        if line.startswith("PING"):
+            await ws.send("PONG :tmi.twitch.tv")
+            return
 
-            while not read_task.done():
-                if time.monotonic() > keepalive_deadline:
-                    logger.warning("Keepalive timeout — reconnecting")
-                    read_task.cancel()
-                    break
-                await asyncio.sleep(1)
+        # Strip IRCv3 tags if present
+        if line.startswith("@"):
+            _, _, line = line.partition(" ")
 
-            if reconnect_url:
-                return reconnect_url
+        # :user!user@user.tmi.twitch.tv PRIVMSG #channel :message text
+        if " PRIVMSG " not in line:
+            return
 
-        return EVENTSUB_WS_URL
-
-    async def _handle(self, msg: dict) -> str | None:
-        """Process one EventSub message. Returns a reconnect URL if Twitch requested one."""
-        msg_type = msg.get("metadata", {}).get("message_type")
-
-        if msg_type == "session_welcome":
-            session = msg["payload"]["session"]
-            self._session_id = session["id"]
-            self._keepalive_timeout = session.get("keepalive_timeout_seconds", 10)
-            await self._subscribe(self._session_id)
-
-        elif msg_type == "notification":
-            event = msg.get("payload", {}).get("event", {})
-            text = event.get("message", {}).get("text", "")
-            self._record_message(text)
-
-        elif msg_type == "session_keepalive":
-            logger.debug("keepalive received")
-
-        elif msg_type == "session_reconnect":
-            return msg["payload"]["session"]["reconnect_url"]
-
-        return None
+        _, _, rest = line.partition(" PRIVMSG ")
+        _, _, text = rest.partition(" :")
+        self._record_message(text)
 
     @staticmethod
     def _ensure_valid_token() -> None:
