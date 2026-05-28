@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 
@@ -11,14 +12,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
-async def main() -> None:
+async def main(dry_run: bool = False) -> None:
     capture = StreamCapture()
     processor = VideoProcessor()
-    uploader = TikTokUploader()
     validator = ClipValidator()
 
     await capture.start()
-    await uploader.start()
+
+    uploader = None
+    if not dry_run:
+        uploader = TikTokUploader()
+        await uploader.start()
 
     async def on_hype_spike(event: HypeEvent, recent_messages: list[str]) -> None:
         logger.info(
@@ -47,6 +51,10 @@ async def main() -> None:
         if not tiktok_clip:
             return
 
+        if dry_run:
+            logger.info("[dry-run] Skipping TikTok upload: %s", tiktok_clip.name)
+            return
+
         success = await uploader.upload(tiktok_clip)
         if success:
             logger.info("Uploaded to TikTok: %s", tiktok_clip.name)
@@ -57,8 +65,12 @@ async def main() -> None:
         await monitor.run()
     finally:
         await capture.stop()
-        await uploader.stop()
+        if uploader is not None:
+            await uploader.stop()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true", help="Skip TikTok upload entirely")
+    args = parser.parse_args()
+    asyncio.run(main(dry_run=args.dry_run))
