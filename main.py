@@ -47,7 +47,7 @@ async def main(dry_run: bool = False) -> None:
         if not raw_clip:
             return
 
-        tiktok_clip = await processor.process(raw_clip)
+        tiktok_clip = await processor.process(raw_clip, reason=result.reason)
         if not tiktok_clip:
             return
 

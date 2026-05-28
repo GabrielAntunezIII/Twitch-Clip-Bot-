@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import config
+from bot.ai.title_generator import TitleGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ def _transcribe_sync(clip_path: Path, model_name: str) -> list[_Word]:
 async def _render(
     raw: Path,
     ass: Path | None,
+    title: str | None,
     out: Path,
 ) -> bool:
     w, h = config.OUTPUT_WIDTH, config.OUTPUT_HEIGHT
@@ -105,17 +107,27 @@ async def _render(
     # Foreground: scale source to fit width, keep aspect ratio
     fg = f"[0:v]scale={w}:-2[fg]"
 
-    # Overlay fg centered vertically over bg
-    overlay = "[bg][fg]overlay=0:(H-h)/2"
+    # Build filter chain: overlay → captions → title
+    chain = ["[bg][fg]overlay=0:(H-h)/2"]
 
-    # Optionally burn in captions
     if ass:
         escaped = str(ass).replace("\\", "/").replace(":", "\\:")
-        video_filter = f"{overlay},subtitles='{escaped}'[vout]"
-    else:
-        video_filter = f"{overlay}[vout]"
+        chain.append(f"subtitles='{escaped}'")
 
-    filter_complex = f"{bg};{fg};{video_filter}"
+    title_file: Path | None = None
+    if title:
+        # Write to a file to avoid drawtext special-character escaping headaches
+        title_file = out.with_suffix(".title.txt")
+        title_file.write_text(title, encoding="utf-8")
+        escaped_tf = str(title_file).replace("\\", "/").replace(":", "\\:")
+        chain.append(
+            f"drawtext=textfile='{escaped_tf}'"
+            f":font='{config.CAPTION_FONT}':fontsize=72:fontcolor=white"
+            f":x=(w-text_w)/2:y=60"
+            f":box=1:boxcolor=black@0.6:boxborderw=12"
+        )
+
+    filter_complex = f"{bg};{fg};" + ",".join(chain) + "[vout]"
 
     tmp = out.with_suffix(".tmp.mp4")
 
@@ -133,11 +145,15 @@ async def _render(
         "-y", str(tmp),
     ]
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+    finally:
+        if title_file:
+            title_file.unlink(missing_ok=True)
 
     if proc.returncode != 0:
         logger.error("ffmpeg render failed:\n%s", stderr.decode().strip())
@@ -154,7 +170,10 @@ async def _render(
 class VideoProcessor:
     """Converts a raw .ts clip into a TikTok-ready vertical MP4."""
 
-    async def process(self, raw_clip: Path) -> Path | None:
+    def __init__(self) -> None:
+        self._title_generator = TitleGenerator()
+
+    async def process(self, raw_clip: Path, reason: str = "") -> Path | None:
         ts = time.strftime("%Y%m%d_%H%M%S")
         out_path = Path(config.CLIPS_DIR) / f"tiktok_{ts}.mp4"
         ass_path = raw_clip.with_suffix(".ass")
@@ -169,13 +188,17 @@ class VideoProcessor:
         except Exception as exc:
             logger.warning("Whisper transcription failed (%s) — rendering without captions", exc)
 
+        transcript = " ".join(w.text for w in words)
+
         if words:
             _write_ass(words, ass_path)
         else:
             ass_path = None
 
+        title = await self._title_generator.generate(reason, transcript) if reason else None
+
         try:
-            success = await _render(raw_clip, ass_path, out_path)
+            success = await _render(raw_clip, ass_path, title, out_path)
         finally:
             if ass_path and ass_path.exists():
                 ass_path.unlink()
