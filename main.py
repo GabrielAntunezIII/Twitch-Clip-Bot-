@@ -49,6 +49,7 @@ async def main(dry_run: bool = False) -> None:
 
         tiktok_clip = await processor.process(raw_clip, reason=result.reason)
         if not tiktok_clip:
+            raw_clip.unlink(missing_ok=True)
             return
 
         if dry_run:
@@ -58,7 +59,9 @@ async def main(dry_run: bool = False) -> None:
         success = await uploader.upload(tiktok_clip)
         if success:
             logger.info("Uploaded to TikTok: %s", tiktok_clip.name)
-            tiktok_clip.unlink(missing_ok=True)
+        else:
+            logger.warning("Upload failed — deleting clip: %s", tiktok_clip.name)
+        tiktok_clip.unlink(missing_ok=True)
 
     monitor = ChatMonitor(on_hype_spike=on_hype_spike)
     try:
