@@ -7,10 +7,16 @@ import config
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
-    "Generate a short, punchy, clickbait TikTok title for a Twitch clip. "
-    "Maximum 60 characters. No hashtags. No surrounding quotes. "
-    "Make it dramatic or intriguing — something viewers can't scroll past. "
-    "Respond with the title text only."
+    "Generate a punchy 2-line TikTok title for a Twitch clip.\n"
+    "Line 1: attention hook — 1-6 words with 1-2 emojis. Max 28 characters including emojis.\n"
+    "Line 2: short teaser or reaction — 3-7 words with 1 emoji. Max 28 characters including emojis.\n"
+    "Separate the two lines with a literal newline. No hashtags. No surrounding quotes.\n"
+    "Match the tone to the clip — shocked, unhinged, funny, dramatic, or wholesome.\n"
+    "Examples:\n"
+    "😱 HE ACTUALLY SAID THAT\n💀 chat is not okay\n\n"
+    "🔥 SHE STARTED CRYING LIVE\n😭 most emotional moment\n\n"
+    "💀 BRO JUST GOT DESTROYED\n😂 streamer lost it\n\n"
+    "Respond with the two lines only."
 )
 
 
@@ -27,9 +33,11 @@ class TitleGenerator:
                 system=_SYSTEM,
                 messages=[{"role": "user", "content": prompt}],
             )
-            title = resp.content[0].text.strip().strip("\"'")
+            raw = resp.content[0].text.strip().strip("\"'")
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            title = "\n".join(lines[:2])
             logger.info("Generated title: %r", title)
-            return title[:80]
+            return title
         except Exception as exc:
             logger.warning("Title generation failed (%s) — using reason as fallback", exc)
-            return reason[:60]
+            return reason[:28]
