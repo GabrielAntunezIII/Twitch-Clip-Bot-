@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 
 from bot.ai.validator import ClipValidator
 from bot.capture.stream_capture import StreamCapture
@@ -8,7 +9,12 @@ from bot.process.video_processor import VideoProcessor
 from bot.twitch.chat_monitor import ChatMonitor, HypeEvent
 from bot.upload.tiktok_uploader import TikTokUploader
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+_fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=_fmt)
+logging.getLogger().addHandler(
+    RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=10, encoding="utf-8")
+)
+logging.getLogger().handlers[-1].setFormatter(logging.Formatter(_fmt))
 logger = logging.getLogger(__name__)
 
 
