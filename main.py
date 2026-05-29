@@ -9,13 +9,15 @@ from bot.process.video_processor import VideoProcessor
 from bot.twitch.chat_monitor import ChatMonitor, HypeEvent
 from bot.upload.tiktok_uploader import TikTokUploader
 
-_fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-logging.basicConfig(level=logging.INFO, format=_fmt)
-logging.getLogger().addHandler(
-    RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=10, encoding="utf-8")
-)
-logging.getLogger().handlers[-1].setFormatter(logging.Formatter(_fmt))
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+# Dedicated clip log — one line per valid clip, file only
+_clip_logger = logging.getLogger("clip_log")
+_clip_logger.propagate = False
+_clip_handler = RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=10, encoding="utf-8")
+_clip_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+_clip_logger.addHandler(_clip_handler)
 
 
 async def main(dry_run: bool = False) -> None:
@@ -57,6 +59,12 @@ async def main(dry_run: bool = False) -> None:
         if not tiktok_clip:
             raw_clip.unlink(missing_ok=True)
             return
+
+        size_mb = tiktok_clip.stat().st_size / 1e6
+        _clip_logger.info(
+            "CLIP | file=%s | size=%.1fMB | confidence=%.2f | reason=%s",
+            tiktok_clip.name, size_mb, result.confidence, result.reason,
+        )
 
         if dry_run:
             logger.info("[dry-run] Skipping TikTok upload: %s", tiktok_clip.name)
