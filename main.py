@@ -2,7 +2,9 @@ import argparse
 import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
+import config
 from bot.ai.validator import ClipValidator
 from bot.capture.stream_capture import StreamCapture
 from bot.process.video_processor import VideoProcessor
@@ -20,7 +22,19 @@ _clip_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 _clip_logger.addHandler(_clip_handler)
 
 
+def _cleanup_orphaned_files() -> None:
+    clips_dir = Path(config.CLIPS_DIR)
+    if not clips_dir.exists():
+        return
+    for pattern in ("*.tmp.mp4", "*.title.txt", "*.ass"):
+        for f in clips_dir.glob(pattern):
+            f.unlink(missing_ok=True)
+            logger.info("Cleaned up orphaned file: %s", f.name)
+
+
 async def main(dry_run: bool = False) -> None:
+    _cleanup_orphaned_files()
+
     capture = StreamCapture()
     processor = VideoProcessor()
     validator = ClipValidator()
@@ -31,6 +45,8 @@ async def main(dry_run: bool = False) -> None:
     if not dry_run:
         uploader = TikTokUploader()
         await uploader.start()
+
+    _active_tasks: set[asyncio.Task] = set()
 
     async def on_hype_spike(event: HypeEvent, recent_messages: list[str]) -> None:
         logger.info(
@@ -77,10 +93,21 @@ async def main(dry_run: bool = False) -> None:
             logger.warning("Upload failed — deleting clip: %s", tiktok_clip.name)
         tiktok_clip.unlink(missing_ok=True)
 
-    monitor = ChatMonitor(on_hype_spike=on_hype_spike)
+    async def tracked_on_hype_spike(event: HypeEvent, recent_messages: list[str]) -> None:
+        task = asyncio.current_task()
+        _active_tasks.add(task)
+        try:
+            await on_hype_spike(event, recent_messages)
+        finally:
+            _active_tasks.discard(task)
+
+    monitor = ChatMonitor(on_hype_spike=tracked_on_hype_spike)
     try:
         await monitor.run()
     finally:
+        if _active_tasks:
+            logger.info("Waiting for %d in-flight clip(s) to finish...", len(_active_tasks))
+            await asyncio.gather(*_active_tasks, return_exceptions=True)
         await capture.stop()
         if uploader is not None:
             await uploader.stop()
