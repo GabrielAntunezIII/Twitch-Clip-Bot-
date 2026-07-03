@@ -122,10 +122,10 @@ async def _render(
         escaped_tf = str(title_file).replace("\\", "/").replace(":", "\\:")
         chain.append(
             f"drawtext=textfile='{escaped_tf}'"
-            f":font='{config.CAPTION_FONT}':fontsize=60:fontcolor=white"
+            f":font='{config.CAPTION_FONT}':fontsize=60:fontcolor=black"
             f":x=(w-text_w)/2:y=55"
             f":line_spacing=8"
-            f":box=1:boxcolor=black@0.6:boxborderw=10"
+            f":box=1:boxcolor=white@1.0:boxborderw=14"
         )
 
     filter_complex = f"{bg};{fg};" + ",".join(chain) + "[vout]"
