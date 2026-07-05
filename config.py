@@ -47,3 +47,6 @@ TIKTOK_HEADLESS = os.environ.get("TIKTOK_HEADLESS", "false").lower() == "true"
 # AI validation
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 AI_RECENT_MSG_COUNT = int(os.environ.get("AI_RECENT_MSG_COUNT", "40"))
+
+# Training data collection (offline tooling only — not required by the live bot)
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")

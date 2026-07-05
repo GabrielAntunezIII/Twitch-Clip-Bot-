@@ -217,3 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 clips/
+
+# Trained-model pipeline artifacts (large binaries — don't check in)
+data-collection/dataset/
+models/*.json
+models/*.txt
+models/*.pkl
+models/*.joblib
