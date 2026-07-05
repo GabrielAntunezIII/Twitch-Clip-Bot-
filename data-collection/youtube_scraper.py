@@ -1,10 +1,14 @@
 """
 Pulls video metadata for a list of YouTube channels via the YouTube Data API v3.
 
-For each channel, walks its "uploads" playlist (cheaper on API quota than
-search.list), fetches view/like counts and publish dates for every video, and
-tags each one as a Short based on duration. Results are written to
-data-collection/dataset/metadata.csv and metadata.json.
+For each channel, the primary source is its dedicated Shorts playlist (the "UC"
+channel-ID prefix swapped for "UUSH" — undocumented, but confirmed working). If
+that playlist is empty or errors out for a given channel, falls back to walking
+the channel's "uploads" playlist and filtering by duration instead. Either way,
+fetches view/like counts, publish dates, and subscriber counts. Results for all
+channels are merged (deduped by video_id) into data-collection/dataset/metadata.csv
+and metadata.json, so repeated runs across different channel lists accumulate
+into the same dataset.
 
 Downloading video files with yt-dlp is deliberately not wired up yet — get the
 metadata validated first.
@@ -26,12 +30,14 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 
 logger = logging.getLogger(__name__)
 
-SHORTS_MAX_DURATION_SECONDS = 180  # generous cutoff; actual Shorts are <= 60s today
+SHORTS_MAX_DURATION_SECONDS = 180  # fallback-mode cutoff; actual Shorts are <= 60s today
 
 
 @dataclass
@@ -55,6 +61,17 @@ def _iso8601_duration_to_seconds(duration: str) -> int:
         return 0
     hours, minutes, seconds = (int(g) if g else 0 for g in match.groups())
     return hours * 3600 + minutes * 60 + seconds
+
+
+def _shorts_playlist_id(channel_id: str) -> str | None:
+    """Dedicated Shorts playlist for a channel: swap the 'UC' prefix for 'UUSH'.
+
+    Undocumented by the YouTube Data API — confirmed working by hand, but not
+    guaranteed to exist for every channel, hence the uploads+duration fallback.
+    """
+    if not channel_id.startswith("UC"):
+        return None
+    return "UUSH" + channel_id[2:]
 
 
 class YouTubeScraper:
@@ -114,12 +131,25 @@ class YouTubeScraper:
 
     def collect_channel(self, channel_id: str, max_results: int) -> list[VideoMetadata]:
         channel_title, subscriber_count, uploads_playlist_id = self._channel_info(channel_id)
-        video_ids = self._playlist_video_ids(uploads_playlist_id, max_results)
+
+        video_ids: list[str] = []
+        shorts_playlist_id = _shorts_playlist_id(channel_id)
+        if shorts_playlist_id:
+            try:
+                video_ids = self._playlist_video_ids(shorts_playlist_id, max_results)
+            except HttpError as exc:
+                logger.warning("%s: Shorts playlist unavailable (%s)", channel_id, exc)
+
+        used_fallback = not video_ids
+        if used_fallback:
+            logger.info("%s: no Shorts playlist results, falling back to uploads + duration filter", channel_id)
+            video_ids = self._playlist_video_ids(uploads_playlist_id, max_results)
 
         records = []
         for item in self._video_stats(video_ids):
             duration = _iso8601_duration_to_seconds(item["contentDetails"]["duration"])
             stats = item["statistics"]
+            is_short = duration <= SHORTS_MAX_DURATION_SECONDS if used_fallback else True
             records.append(
                 VideoMetadata(
                     video_id=item["id"],
@@ -131,11 +161,20 @@ class YouTubeScraper:
                     view_count=int(stats.get("viewCount", 0)),
                     like_count=int(stats.get("likeCount", 0)),
                     duration_seconds=duration,
-                    is_short=duration <= SHORTS_MAX_DURATION_SECONDS,
+                    is_short=is_short,
                 )
             )
-        logger.info("%s: %d videos found (%d Shorts)", channel_id, len(records), sum(r.is_short for r in records))
+        source = "uploads+duration fallback" if used_fallback else "Shorts playlist"
+        logger.info("%s: %d videos found via %s (%d Shorts)", channel_id, len(records), source, sum(r.is_short for r in records))
         return records
+
+
+def _load_existing(output_dir: Path) -> list[VideoMetadata]:
+    json_path = output_dir / "metadata.json"
+    if not json_path.exists():
+        return []
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    return [VideoMetadata(**item) for item in data]
 
 
 def _write_outputs(records: list[VideoMetadata], output_dir: Path) -> None:
@@ -170,19 +209,27 @@ def main() -> None:
 
     scraper = YouTubeScraper(config.YOUTUBE_API_KEY)
 
-    all_records: list[VideoMetadata] = []
+    new_records: list[VideoMetadata] = []
     for channel_id in args.channels:
         try:
             records = scraper.collect_channel(channel_id, args.max_per_channel)
         except Exception as exc:
             logger.error("Failed to collect channel %s: %s", channel_id, exc)
             continue
-        all_records.extend(records)
+        new_records.extend(records)
 
     if args.shorts_only:
-        all_records = [r for r in all_records if r.is_short]
+        new_records = [r for r in new_records if r.is_short]
 
-    _write_outputs(all_records, Path(args.output_dir))
+    output_dir = Path(args.output_dir)
+    merged = {r.video_id: r for r in _load_existing(output_dir)}
+    merged.update({r.video_id: r for r in new_records})
+
+    _write_outputs(list(merged.values()), output_dir)
+    logger.info(
+        "This run: %d records across %d channel(s). Dataset total: %d records.",
+        len(new_records), len(args.channels), len(merged),
+    )
 
 
 if __name__ == "__main__":
