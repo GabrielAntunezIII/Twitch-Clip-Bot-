@@ -4,23 +4,31 @@ engagement-derived labels from `data-collection/`.
 
 Joins feature-extraction/dataset/features.json (audio spikes, scene changes,
 transcript stats, sentiment) with data-collection/dataset/metadata.json
-(views, likes, subscriber_count) on video_id. Since there's no ground-truth
-"clip-worthy" label, one is derived from engagement ranked WITHIN each
-channel:
+(views, likes, subscriber_count, published_at) on video_id. Since there's no
+ground-truth "clip-worthy" label, one is derived from engagement ranked
+WITHIN each channel:
 
-    engagement = log1p(view_count) + 0.5 * log1p(like_count)
+    views_per_day = view_count / days_since_published (floor 1 day)
+    engagement = log1p(views_per_day) + 0.5 * log1p(like_count)
     percentile = engagement.rank(pct=True) computed per channel_id,
                  using ALL of that channel's videos in metadata.json
                  (not just the ones sampled for feature-extraction)
 
-Cross-channel engagement (e.g. normalizing by subscriber_count) turned out
-to mostly encode channel identity rather than clip quality — a repost/
-compilation channel with 17M subs can have a structurally lower
-views-per-sub ceiling than the original creator's own channel, which has
-nothing to do with any individual clip being better or worse. Ranking each
-video only against other videos from the *same* channel removes that
-between-channel confound. Videos are then labeled 1/0 by a percentile split
-(median by default) within their own channel.
+Two confounds got fixed here, in order of discovery:
+
+1. Cross-channel engagement (e.g. normalizing by subscriber_count) mostly
+   encoded channel identity rather than clip quality — a repost/compilation
+   channel with 17M subs can have a structurally lower views-per-sub ceiling
+   than the original creator's own channel, which has nothing to do with any
+   individual clip being better or worse. Fixed by ranking each video only
+   against other videos from the *same* channel.
+2. Within a channel, publish dates in this dataset span 2021-2026, so raw
+   view_count also conflates "good clip" with "old clip that had years to
+   accumulate views." Fixed by dividing by days_since_published before
+   ranking.
+
+Videos are then labeled 1/0 by a percentile split (median by default)
+within their own channel.
 
 With few labeled rows (the common case until feature-extraction has been run
 at scale), a single train/test split is too noisy to trust, so below
@@ -69,8 +77,18 @@ def _channel_percentiles(metadata: pd.DataFrame) -> pd.DataFrame:
     """Engagement percentile of each video within its own channel, computed
     against ALL of that channel's videos in metadata (not just the ones
     sampled for feature-extraction) so the ranking isn't skewed by a small
-    sample of one channel's output."""
-    engagement = np.log1p(metadata["view_count"]) + 0.5 * np.log1p(metadata["like_count"])
+    sample of one channel's output.
+
+    Normalizes views by days_since_published first — without this, videos
+    published years apart within the same channel aren't comparable, since
+    older ones have had far longer to accumulate views regardless of
+    quality.
+    """
+    published_at = pd.to_datetime(metadata["published_at"], utc=True)
+    days_since_published = (pd.Timestamp.now(tz="UTC") - published_at).dt.total_seconds() / 86400
+    views_per_day = metadata["view_count"] / days_since_published.clip(lower=1)
+
+    engagement = np.log1p(views_per_day) + 0.5 * np.log1p(metadata["like_count"])
     percentile = engagement.groupby(metadata["channel_id"]).rank(pct=True)
     return metadata[["video_id"]].assign(engagement_percentile=percentile)
 
