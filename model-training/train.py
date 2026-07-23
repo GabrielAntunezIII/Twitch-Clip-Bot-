@@ -1,0 +1,200 @@
+"""
+Trains an XGBoost clip-scoring model on features from `feature-extraction/` and
+engagement-derived labels from `data-collection/`.
+
+Joins feature-extraction/dataset/features.json (audio spikes, scene changes,
+transcript stats, sentiment) with data-collection/dataset/metadata.json
+(views, likes, subscriber_count) on video_id. Since there's no ground-truth
+"clip-worthy" label, one is derived from engagement normalized by channel
+size:
+
+    engagement = log1p(view_count) + 0.5 * log1p(like_count) - log1p(subscriber_count)
+
+This rewards videos that overperform relative to their channel's following
+(a signal the content itself was clip-worthy) rather than just rewarding
+big channels. Videos are then labeled 1/0 by an engagement percentile split
+(median by default).
+
+With few labeled rows (the common case until feature-extraction has been run
+at scale), a single train/test split is too noisy to trust, so below
+`--cv-min-rows` the script instead reports stratified k-fold cross-validated
+metrics and fits the final model on all available data.
+
+Usage:
+  python model-training/train.py
+  python model-training/train.py --label-percentile 0.67 --n-estimators 200
+"""
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, train_test_split
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+logger = logging.getLogger(__name__)
+
+METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "metadata.json"
+FEATURES_PATH = REPO_ROOT / "feature-extraction" / "dataset" / "features.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "models"
+
+FEATURE_COLUMNS = [
+    "duration_seconds",
+    "audio_spike_count",
+    "scene_change_count",
+    "transcript_word_count",
+    "transcript_keyword_score",
+    "sentiment_compound",
+    "sentiment_pos",
+    "sentiment_neg",
+]
+
+
+def _load_dataset(metadata_path: Path, features_path: Path) -> pd.DataFrame:
+    metadata = pd.DataFrame(json.loads(metadata_path.read_text(encoding="utf-8")))
+    features = pd.DataFrame(json.loads(features_path.read_text(encoding="utf-8")))
+    merged = features.merge(
+        metadata[["video_id", "view_count", "like_count", "subscriber_count"]],
+        on="video_id",
+        how="inner",
+    )
+    dropped = len(features) - len(merged)
+    if dropped:
+        logger.warning("%d feature rows had no matching metadata row — dropped", dropped)
+    return merged
+
+
+def _label_engagement(df: pd.DataFrame, percentile: float) -> pd.Series:
+    engagement = (
+        np.log1p(df["view_count"])
+        + 0.5 * np.log1p(df["like_count"])
+        - np.log1p(df["subscriber_count"])
+    )
+    threshold = engagement.quantile(percentile)
+    return (engagement >= threshold).astype(int)
+
+
+def _cross_validated_metrics(X: pd.DataFrame, y: pd.Series, params: dict, folds: int) -> dict:
+    n_splits = min(folds, y.value_counts().min())
+    if n_splits < 2:
+        logger.warning("Not enough class balance for cross-validation — skipping metrics")
+        return {}
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    accuracies, aucs = [], []
+    for train_idx, test_idx in skf.split(X, y):
+        model = xgb.XGBClassifier(**params)
+        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        preds = model.predict(X.iloc[test_idx])
+        accuracies.append(accuracy_score(y.iloc[test_idx], preds))
+        if y.iloc[test_idx].nunique() > 1:
+            probs = model.predict_proba(X.iloc[test_idx])[:, 1]
+            aucs.append(roc_auc_score(y.iloc[test_idx], probs))
+
+    return {
+        "method": f"{n_splits}-fold cross-validation",
+        "accuracy_mean": float(np.mean(accuracies)),
+        "auc_mean": float(np.mean(aucs)) if aucs else None,
+    }
+
+
+def _holdout_metrics(X: pd.DataFrame, y: pd.Series, params: dict, test_size: float, seed: int) -> dict:
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=seed, stratify=y
+    )
+    model = xgb.XGBClassifier(**params)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1]) if y_test.nunique() > 1 else None
+    return {
+        "method": "holdout",
+        "accuracy": float(accuracy_score(y_test, preds)),
+        "auc": float(auc) if auc is not None else None,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--metadata-path", default=str(METADATA_PATH))
+    parser.add_argument("--features-path", default=str(FEATURES_PATH))
+    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--label-percentile", type=float, default=0.5, help="Engagement quantile above which a video is labeled clip-worthy")
+    parser.add_argument("--cv-min-rows", type=int, default=100, help="Below this many rows, use cross-validation instead of a holdout split")
+    parser.add_argument("--cv-folds", type=int, default=5)
+    parser.add_argument("--test-size", type=float, default=0.2)
+    parser.add_argument("--n-estimators", type=int, default=200)
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--learning-rate", type=float, default=0.05)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    metadata_path = Path(args.metadata_path)
+    features_path = Path(args.features_path)
+    if not metadata_path.exists() or not features_path.exists():
+        logger.error(
+            "Missing input data (metadata=%s exists=%s, features=%s exists=%s) — "
+            "run data-collection/youtube_scraper.py and feature-extraction/extract_features.py first",
+            metadata_path, metadata_path.exists(), features_path, features_path.exists(),
+        )
+        sys.exit(1)
+
+    df = _load_dataset(metadata_path, features_path)
+    if len(df) < 10:
+        logger.error("Only %d joined rows available — need more before training means anything. Run feature-extraction at a larger --sample-size.", len(df))
+        sys.exit(1)
+
+    df["label"] = _label_engagement(df, args.label_percentile)
+    X = df[FEATURE_COLUMNS]
+    y = df["label"]
+    logger.info("Dataset: %d rows, label distribution: %s", len(df), y.value_counts().to_dict())
+
+    params = dict(
+        n_estimators=args.n_estimators,
+        max_depth=args.max_depth,
+        learning_rate=args.learning_rate,
+        eval_metric="logloss",
+        random_state=args.seed,
+    )
+
+    if len(df) < args.cv_min_rows:
+        logger.info("%d rows < --cv-min-rows=%d, using cross-validation instead of a holdout split", len(df), args.cv_min_rows)
+        metrics = _cross_validated_metrics(X, y, params, args.cv_folds)
+    else:
+        metrics = _holdout_metrics(X, y, params, args.test_size, args.seed)
+
+    if metrics:
+        logger.info("Eval metrics (%s): %s", metrics["method"], metrics)
+    else:
+        logger.warning("No eval metrics computed — dataset too small or too imbalanced")
+
+    final_model = xgb.XGBClassifier(**params)
+    final_model.fit(X, y)
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model_path = output_dir / "clip_scorer.json"
+    final_model.save_model(str(model_path))
+
+    metadata_out = {
+        "feature_columns": FEATURE_COLUMNS,
+        "label_percentile": args.label_percentile,
+        "n_training_rows": len(df),
+        "eval_metrics": metrics,
+        "xgboost_params": params,
+    }
+    (output_dir / "clip_scorer.meta.json").write_text(json.dumps(metadata_out, indent=2), encoding="utf-8")
+
+    logger.info("Saved model to %s and metadata to %s", model_path, output_dir / "clip_scorer.meta.json")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    main()
