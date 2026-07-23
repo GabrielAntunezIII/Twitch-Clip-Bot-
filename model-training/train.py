@@ -5,15 +5,22 @@ engagement-derived labels from `data-collection/`.
 Joins feature-extraction/dataset/features.json (audio spikes, scene changes,
 transcript stats, sentiment) with data-collection/dataset/metadata.json
 (views, likes, subscriber_count) on video_id. Since there's no ground-truth
-"clip-worthy" label, one is derived from engagement normalized by channel
-size:
+"clip-worthy" label, one is derived from engagement ranked WITHIN each
+channel:
 
-    engagement = log1p(view_count) + 0.5 * log1p(like_count) - log1p(subscriber_count)
+    engagement = log1p(view_count) + 0.5 * log1p(like_count)
+    percentile = engagement.rank(pct=True) computed per channel_id,
+                 using ALL of that channel's videos in metadata.json
+                 (not just the ones sampled for feature-extraction)
 
-This rewards videos that overperform relative to their channel's following
-(a signal the content itself was clip-worthy) rather than just rewarding
-big channels. Videos are then labeled 1/0 by an engagement percentile split
-(median by default).
+Cross-channel engagement (e.g. normalizing by subscriber_count) turned out
+to mostly encode channel identity rather than clip quality — a repost/
+compilation channel with 17M subs can have a structurally lower
+views-per-sub ceiling than the original creator's own channel, which has
+nothing to do with any individual clip being better or worse. Ranking each
+video only against other videos from the *same* channel removes that
+between-channel confound. Videos are then labeled 1/0 by a percentile split
+(median by default) within their own channel.
 
 With few labeled rows (the common case until feature-extraction has been run
 at scale), a single train/test split is too noisy to trust, so below
@@ -58,14 +65,21 @@ FEATURE_COLUMNS = [
 ]
 
 
+def _channel_percentiles(metadata: pd.DataFrame) -> pd.DataFrame:
+    """Engagement percentile of each video within its own channel, computed
+    against ALL of that channel's videos in metadata (not just the ones
+    sampled for feature-extraction) so the ranking isn't skewed by a small
+    sample of one channel's output."""
+    engagement = np.log1p(metadata["view_count"]) + 0.5 * np.log1p(metadata["like_count"])
+    percentile = engagement.groupby(metadata["channel_id"]).rank(pct=True)
+    return metadata[["video_id"]].assign(engagement_percentile=percentile)
+
+
 def _load_dataset(metadata_path: Path, features_path: Path) -> pd.DataFrame:
     metadata = pd.DataFrame(json.loads(metadata_path.read_text(encoding="utf-8")))
     features = pd.DataFrame(json.loads(features_path.read_text(encoding="utf-8")))
-    merged = features.merge(
-        metadata[["video_id", "view_count", "like_count", "subscriber_count"]],
-        on="video_id",
-        how="inner",
-    )
+    percentiles = _channel_percentiles(metadata)
+    merged = features.merge(percentiles, on="video_id", how="inner")
     dropped = len(features) - len(merged)
     if dropped:
         logger.warning("%d feature rows had no matching metadata row — dropped", dropped)
@@ -73,13 +87,7 @@ def _load_dataset(metadata_path: Path, features_path: Path) -> pd.DataFrame:
 
 
 def _label_engagement(df: pd.DataFrame, percentile: float) -> pd.Series:
-    engagement = (
-        np.log1p(df["view_count"])
-        + 0.5 * np.log1p(df["like_count"])
-        - np.log1p(df["subscriber_count"])
-    )
-    threshold = engagement.quantile(percentile)
-    return (engagement >= threshold).astype(int)
+    return (df["engagement_percentile"] >= percentile).astype(int)
 
 
 def _cross_validated_metrics(X: pd.DataFrame, y: pd.Series, params: dict, folds: int) -> dict:
