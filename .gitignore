@@ -221,7 +221,8 @@ clips/
 # Trained-model pipeline artifacts (large binaries — don't check in)
 data-collection/dataset/
 feature-extraction/dataset/
-models/*.json
-models/*.txt
-models/*.pkl
-models/*.joblib
+models/**/*.json
+models/**/*.txt
+models/**/*.pkl
+models/**/*.joblib
+alignment/cache/

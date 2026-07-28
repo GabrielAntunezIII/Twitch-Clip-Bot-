@@ -147,12 +147,29 @@ def _holdout_metrics(X: pd.DataFrame, y: pd.Series, params: dict, test_size: flo
     }
 
 
+def _load_explicit_dataset(features_path: Path) -> pd.DataFrame:
+    """Loads a features file that already carries a `label` column (e.g. from
+    feature-extraction/extract_window_features.py, where the label comes from
+    alignment/build_windows.py's clip<->source-video cross-referencing rather
+    than an engagement proxy). No metadata join needed."""
+    df = pd.DataFrame(json.loads(features_path.read_text(encoding="utf-8")))
+    if "label" not in df.columns:
+        raise ValueError(f"{features_path} has no 'label' column — expected explicit per-row labels")
+    return df
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--metadata-path", default=str(METADATA_PATH))
     parser.add_argument("--features-path", default=str(FEATURES_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument("--label-percentile", type=float, default=0.5, help="Engagement quantile above which a video is labeled clip-worthy")
+    parser.add_argument(
+        "--label-source", choices=["engagement", "explicit"], default="engagement",
+        help="'engagement' derives a label from views/likes percentile (needs --metadata-path). "
+             "'explicit' reads a 'label' column already present in --features-path (e.g. windows "
+             "built by alignment/build_windows.py) and skips the metadata join entirely.",
+    )
+    parser.add_argument("--label-percentile", type=float, default=0.5, help="Engagement quantile above which a video is labeled clip-worthy (--label-source engagement only)")
     parser.add_argument("--cv-min-rows", type=int, default=100, help="Below this many rows, use cross-validation instead of a holdout split")
     parser.add_argument("--cv-folds", type=int, default=5)
     parser.add_argument("--test-size", type=float, default=0.2)
@@ -162,22 +179,29 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    metadata_path = Path(args.metadata_path)
     features_path = Path(args.features_path)
-    if not metadata_path.exists() or not features_path.exists():
-        logger.error(
-            "Missing input data (metadata=%s exists=%s, features=%s exists=%s) — "
-            "run data-collection/youtube_scraper.py and feature-extraction/extract_features.py first",
-            metadata_path, metadata_path.exists(), features_path, features_path.exists(),
-        )
-        sys.exit(1)
 
-    df = _load_dataset(metadata_path, features_path)
+    if args.label_source == "explicit":
+        if not features_path.exists():
+            logger.error("Missing features file %s — run feature-extraction/extract_window_features.py first", features_path)
+            sys.exit(1)
+        df = _load_explicit_dataset(features_path)
+    else:
+        metadata_path = Path(args.metadata_path)
+        if not metadata_path.exists() or not features_path.exists():
+            logger.error(
+                "Missing input data (metadata=%s exists=%s, features=%s exists=%s) — "
+                "run data-collection/youtube_scraper.py and feature-extraction/extract_features.py first",
+                metadata_path, metadata_path.exists(), features_path, features_path.exists(),
+            )
+            sys.exit(1)
+        df = _load_dataset(metadata_path, features_path)
+        df["label"] = _label_engagement(df, args.label_percentile)
+
     if len(df) < 10:
-        logger.error("Only %d joined rows available — need more before training means anything. Run feature-extraction at a larger --sample-size.", len(df))
+        logger.error("Only %d rows available — need more before training means anything.", len(df))
         sys.exit(1)
 
-    df["label"] = _label_engagement(df, args.label_percentile)
     X = df[FEATURE_COLUMNS]
     y = df["label"]
     logger.info("Dataset: %d rows, label distribution: %s", len(df), y.value_counts().to_dict())
@@ -211,7 +235,8 @@ def main() -> None:
 
     metadata_out = {
         "feature_columns": FEATURE_COLUMNS,
-        "label_percentile": args.label_percentile,
+        "label_source": args.label_source,
+        "label_percentile": args.label_percentile if args.label_source == "engagement" else None,
         "n_training_rows": len(df),
         "eval_metrics": metrics,
         "xgboost_params": params,
