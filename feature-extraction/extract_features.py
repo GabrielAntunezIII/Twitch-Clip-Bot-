@@ -97,7 +97,7 @@ def _sample_videos(metadata: list[dict], n: int, seed: int) -> list[dict]:
     return sampled
 
 
-def download_video(video_id: str, videos_dir: Path) -> Path | None:
+def download_video(video_id: str, url: str, videos_dir: Path) -> Path | None:
     out_path = videos_dir / f"{video_id}.mp4"
     if out_path.exists():
         logger.debug("Already downloaded: %s", video_id)
@@ -107,7 +107,7 @@ def download_video(video_id: str, videos_dir: Path) -> Path | None:
         "yt-dlp",
         "-f", "mp4[height<=720]/mp4/best",
         "-o", str(out_path),
-        f"https://www.youtube.com/watch?v={video_id}",
+        url,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -231,6 +231,7 @@ def _write_outputs(records: list[VideoFeatures], output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sample-size", type=int, default=25)
+    parser.add_argument("--metadata-path", default=str(METADATA_PATH))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--scene-threshold", type=float, default=SCENE_CHANGE_THRESHOLD)
@@ -238,11 +239,12 @@ def main() -> None:
     parser.add_argument("--whisper-model", default=config.WHISPER_MODEL, help="tiny | base | small | medium | large")
     args = parser.parse_args()
 
-    if not METADATA_PATH.exists():
-        logger.error("No metadata found at %s — run data-collection/youtube_scraper.py first", METADATA_PATH)
+    metadata_path = Path(args.metadata_path)
+    if not metadata_path.exists():
+        logger.error("No metadata found at %s — run data-collection/youtube_scraper.py or tiktok_scraper.py first", metadata_path)
         sys.exit(1)
 
-    metadata = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     sample = _sample_videos(metadata, args.sample_size, args.seed)
     logger.info("Sampled %d videos across %d channels", len(sample), len({r["channel_id"] for r in sample}))
 
@@ -258,7 +260,8 @@ def main() -> None:
     records = []
     for row in sample:
         video_id = row["video_id"]
-        if download_video(video_id, videos_dir) is None:
+        url = row.get("url") or f"https://www.youtube.com/watch?v={video_id}"
+        if download_video(video_id, url, videos_dir) is None:
             continue
         features = extract_features(
             video_id, row["channel_id"], videos_dir, args.scene_threshold, args.spike_db, whisper_model
