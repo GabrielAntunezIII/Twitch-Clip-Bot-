@@ -50,7 +50,12 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import (
+    GroupShuffleSplit,
+    StratifiedGroupKFold,
+    StratifiedKFold,
+    train_test_split,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -108,15 +113,31 @@ def _label_engagement(df: pd.DataFrame, percentile: float) -> pd.Series:
     return (df["engagement_percentile"] >= percentile).astype(int)
 
 
-def _cross_validated_metrics(X: pd.DataFrame, y: pd.Series, params: dict, folds: int) -> dict:
-    n_splits = min(folds, y.value_counts().min())
+def _cross_validated_metrics(
+    X: pd.DataFrame, y: pd.Series, groups: pd.Series, params: dict, folds: int
+) -> dict:
+    n_splits = min(folds, y.value_counts().min(), groups.nunique())
     if n_splits < 2:
-        logger.warning("Not enough class balance for cross-validation — skipping metrics")
+        logger.warning("Not enough class/group balance for cross-validation — skipping metrics")
         return {}
 
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    grouped = groups.nunique() >= n_splits * 2
+    if grouped:
+        splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        split_args = (X, y, groups)
+        method = f"{n_splits}-fold grouped cross-validation (grouped by source video)"
+    else:
+        logger.warning(
+            "Only %d distinct source videos — too few to hold whole videos out per fold; "
+            "falling back to ungrouped cross-validation (metrics may be optimistic)",
+            groups.nunique(),
+        )
+        splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        split_args = (X, y)
+        method = f"{n_splits}-fold cross-validation (ungrouped)"
+
     accuracies, aucs = [], []
-    for train_idx, test_idx in skf.split(X, y):
+    for train_idx, test_idx in splitter.split(*split_args):
         model = xgb.XGBClassifier(**params)
         model.fit(X.iloc[train_idx], y.iloc[train_idx])
         preds = model.predict(X.iloc[test_idx])
@@ -126,22 +147,38 @@ def _cross_validated_metrics(X: pd.DataFrame, y: pd.Series, params: dict, folds:
             aucs.append(roc_auc_score(y.iloc[test_idx], probs))
 
     return {
-        "method": f"{n_splits}-fold cross-validation",
+        "method": method,
         "accuracy_mean": float(np.mean(accuracies)),
         "auc_mean": float(np.mean(aucs)) if aucs else None,
     }
 
 
-def _holdout_metrics(X: pd.DataFrame, y: pd.Series, params: dict, test_size: float, seed: int) -> dict:
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=seed, stratify=y
-    )
+def _holdout_metrics(
+    X: pd.DataFrame, y: pd.Series, groups: pd.Series, params: dict, test_size: float, seed: int
+) -> dict:
+    if groups.nunique() >= 5:
+        splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+        train_idx, test_idx = next(splitter.split(X, y, groups))
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        method = "holdout (grouped by source video)"
+    else:
+        logger.warning(
+            "Only %d distinct source videos — too few to hold whole videos out; "
+            "falling back to ungrouped holdout (metrics may be optimistic)",
+            groups.nunique(),
+        )
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=seed, stratify=y
+        )
+        method = "holdout (ungrouped)"
+
     model = xgb.XGBClassifier(**params)
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
     auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1]) if y_test.nunique() > 1 else None
     return {
-        "method": "holdout",
+        "method": method,
         "accuracy": float(accuracy_score(y_test, preds)),
         "auc": float(auc) if auc is not None else None,
     }
@@ -204,7 +241,11 @@ def main() -> None:
 
     X = df[FEATURE_COLUMNS]
     y = df["label"]
-    logger.info("Dataset: %d rows, label distribution: %s", len(df), y.value_counts().to_dict())
+    groups = df["channel_id"]
+    logger.info(
+        "Dataset: %d rows across %d source videos, label distribution: %s",
+        len(df), groups.nunique(), y.value_counts().to_dict(),
+    )
 
     params = dict(
         n_estimators=args.n_estimators,
@@ -216,9 +257,9 @@ def main() -> None:
 
     if len(df) < args.cv_min_rows:
         logger.info("%d rows < --cv-min-rows=%d, using cross-validation instead of a holdout split", len(df), args.cv_min_rows)
-        metrics = _cross_validated_metrics(X, y, params, args.cv_folds)
+        metrics = _cross_validated_metrics(X, y, groups, params, args.cv_folds)
     else:
-        metrics = _holdout_metrics(X, y, params, args.test_size, args.seed)
+        metrics = _holdout_metrics(X, y, groups, params, args.test_size, args.seed)
 
     if metrics:
         logger.info("Eval metrics (%s): %s", metrics["method"], metrics)
