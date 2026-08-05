@@ -1,9 +1,9 @@
 """
-Trains an XGBoost clip-scoring model on features from `feature-extraction/` and
-engagement-derived labels from `data-collection/`.
+Trains an XGBoost clip-scoring model on features from `training/feature-extraction/` and
+engagement-derived labels from `training/data-collection/`.
 
-Joins feature-extraction/dataset/features.json (audio spikes, scene changes,
-transcript stats, sentiment) with data-collection/dataset/metadata.json
+Joins training/feature-extraction/dataset/features.json (audio spikes, scene changes,
+transcript stats, sentiment) with training/data-collection/dataset/metadata.json
 (views, likes, subscriber_count, published_at) on video_id. Since there's no
 ground-truth "clip-worthy" label, one is derived from engagement ranked
 WITHIN each channel:
@@ -36,8 +36,8 @@ at scale), a single train/test split is too noisy to trust, so below
 metrics and fits the final model on all available data.
 
 Usage:
-  python model-training/train.py
-  python model-training/train.py --label-percentile 0.67 --n-estimators 200
+  python training/model-training/train.py
+  python training/model-training/train.py --label-percentile 0.67 --n-estimators 200
 """
 
 import argparse
@@ -57,13 +57,14 @@ from sklearn.model_selection import (
     train_test_split,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+TRAINING_ROOT = Path(__file__).resolve().parent.parent  # training/
+REPO_ROOT = TRAINING_ROOT.parent                          # true repo root
 sys.path.insert(0, str(REPO_ROOT))
 
 logger = logging.getLogger(__name__)
 
-METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "metadata.json"
-FEATURES_PATH = REPO_ROOT / "feature-extraction" / "dataset" / "features.json"
+METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "metadata.json"
+FEATURES_PATH = TRAINING_ROOT / "feature-extraction" / "dataset" / "features.json"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "models"
 
 FEATURE_COLUMNS = [
@@ -186,8 +187,8 @@ def _holdout_metrics(
 
 def _load_explicit_dataset(features_path: Path) -> pd.DataFrame:
     """Loads a features file that already carries a `label` column (e.g. from
-    feature-extraction/extract_window_features.py, where the label comes from
-    alignment/build_windows.py's clip<->source-video cross-referencing rather
+    training/feature-extraction/extract_window_features.py, where the label comes from
+    training/alignment/build_windows.py's clip<->source-video cross-referencing rather
     than an engagement proxy). No metadata join needed."""
     df = pd.DataFrame(json.loads(features_path.read_text(encoding="utf-8")))
     if "label" not in df.columns:
@@ -220,7 +221,7 @@ def main() -> None:
 
     if args.label_source == "explicit":
         if not features_path.exists():
-            logger.error("Missing features file %s — run feature-extraction/extract_window_features.py first", features_path)
+            logger.error("Missing features file %s — run training/feature-extraction/extract_window_features.py first", features_path)
             sys.exit(1)
         df = _load_explicit_dataset(features_path)
     else:
@@ -228,7 +229,7 @@ def main() -> None:
         if not metadata_path.exists() or not features_path.exists():
             logger.error(
                 "Missing input data (metadata=%s exists=%s, features=%s exists=%s) — "
-                "run data-collection/youtube_scraper.py and feature-extraction/extract_features.py first",
+                "run training/data-collection/youtube_scraper.py and training/feature-extraction/extract_features.py first",
                 metadata_path, metadata_path.exists(), features_path, features_path.exists(),
             )
             sys.exit(1)

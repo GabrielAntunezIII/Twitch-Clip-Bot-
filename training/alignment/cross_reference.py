@@ -19,10 +19,10 @@ under an hour).
 
 Usage:
   # Validation run on a small sample first -- see the plan's Phase B checkpoint
-  python alignment/cross_reference.py --limit 25
+  python training/alignment/cross_reference.py --limit 25
 
   # Full run
-  python alignment/cross_reference.py
+  python training/alignment/cross_reference.py
 """
 
 import argparse
@@ -34,17 +34,17 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import correlate
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+TRAINING_ROOT = Path(__file__).resolve().parent.parent  # training/ -- parent of the 'alignment' package
+sys.path.insert(0, str(TRAINING_ROOT))
 
 from alignment.audio_fingerprint import FPS, get_envelope  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-CLIPS_METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "tiktok_metadata.json"
-SOURCES_METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_sources_metadata.json"
-CACHE_DIR = REPO_ROOT / "alignment" / "cache"
-OUTPUT_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_clip_matches.json"
+CLIPS_METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "tiktok_metadata.json"
+SOURCES_METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_sources_metadata.json"
+CACHE_DIR = TRAINING_ROOT / "alignment" / "cache"
+OUTPUT_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_clip_matches.json"
 
 MIN_CANDIDATE_MULTIPLE = 1.0  # candidate must be at least as long as the clip to search within it
 

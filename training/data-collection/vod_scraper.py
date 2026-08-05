@@ -1,20 +1,20 @@
 """
 Pulls video metadata for one or more YouTube channels via yt-dlp's
 flat-playlist extraction, for use as CANDIDATE SOURCE VIDEOS in
-alignment/cross_reference.py — i.e. full-length uploads a short clip might
+training/alignment/cross_reference.py — i.e. full-length uploads a short clip might
 have been cut from, not the clips themselves.
 
 Unlike youtube_scraper.py (which targets a channel's Shorts and needs
 YOUTUBE_API_KEY for view/like stats), this only needs id/title/duration/
 publish-date/url, all available directly from yt-dlp's flat-playlist
 listing with no API key. Results across channels are merged (deduped by
-video_id) into data-collection/dataset/<output-name>.csv/.json, so repeated
+video_id) into training/data-collection/dataset/<output-name>.csv/.json, so repeated
 runs across different channel lists accumulate into the same dataset.
 
 Usage:
-  python data-collection/vod_scraper.py \\
+  python training/data-collection/vod_scraper.py \\
       --channels UCbZkHHK3mX0p8LiYcLgRxng UCb2y3fAB0mt6Chk7fTko7eg \\
-      --output-dir data-collection/dataset \\
+      --output-dir training/data-collection/dataset \\
       --output-name togi_sources
 """
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yt_dlp
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def _write_outputs(records: list[SourceVideoMetadata], output_dir: Path, output_
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--channels", nargs="+", required=True, help="YouTube channel IDs (UCxxxx)")
-    parser.add_argument("--output-dir", default="data-collection/dataset")
+    parser.add_argument("--output-dir", default="training/data-collection/dataset")
     parser.add_argument("--output-name", default="vod_sources", help="Basename for output files, e.g. 'togi_sources'")
     parser.add_argument("--max-per-channel", type=int, default=500)
     args = parser.parse_args()

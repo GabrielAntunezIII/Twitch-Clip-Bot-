@@ -6,7 +6,7 @@ channel-ID prefix swapped for "UUSH" — undocumented, but confirmed working). I
 that playlist is empty or errors out for a given channel, falls back to walking
 the channel's "uploads" playlist and filtering by duration instead. Either way,
 fetches view/like counts, publish dates, and subscriber counts. Results for all
-channels are merged (deduped by video_id) into data-collection/dataset/metadata.csv
+channels are merged (deduped by video_id) into training/data-collection/dataset/metadata.csv
 and metadata.json, so repeated runs across different channel lists accumulate
 into the same dataset.
 
@@ -14,9 +14,9 @@ Downloading video files with yt-dlp is deliberately not wired up yet — get the
 metadata validated first.
 
 Usage:
-  python data-collection/youtube_scraper.py \\
+  python training/data-collection/youtube_scraper.py \\
       --channels UCxxxx UCyyyy \\
-      --output-dir data-collection/dataset \\
+      --output-dir training/data-collection/dataset \\
       --max-per-channel 50
 """
 
@@ -32,7 +32,7 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import config
 
 logger = logging.getLogger(__name__)
@@ -196,7 +196,7 @@ def _write_outputs(records: list[VideoMetadata], output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--channels", nargs="+", required=True, help="YouTube channel IDs")
-    parser.add_argument("--output-dir", default="data-collection/dataset")
+    parser.add_argument("--output-dir", default="training/data-collection/dataset")
     parser.add_argument("--max-per-channel", type=int, default=50)
     parser.add_argument(
         "--shorts-only", action="store_true", help="Drop videos longer than %ds" % SHORTS_MAX_DURATION_SECONDS

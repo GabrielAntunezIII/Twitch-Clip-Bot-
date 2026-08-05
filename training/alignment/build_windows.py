@@ -1,5 +1,5 @@
 """
-Turns confident clip->source matches (alignment/cross_reference.py) into a
+Turns confident clip->source matches (training/alignment/cross_reference.py) into a
 labeled window dataset: fixed-length (45s, matching config.CLIP_DURATION_BEFORE
 + CLIP_DURATION_AFTER -- the same span the live bot actually clips) positive
 windows centered on each matched clip, plus sampled negative windows drawn
@@ -16,12 +16,12 @@ are dropped rather than relabeled 0 -- an underperforming clip doesn't mean
 the moment was bad (could be a weak edit/caption/post-time instead), so it's
 excluded as ambiguous rather than treated as a confident negative.
 
-Output schema is deliberately compatible with model-training/train.py's
+Output schema is deliberately compatible with training/model-training/train.py's
 --label-source explicit mode: each row already carries a binary `label`,
 so no engagement-percentile derivation is needed downstream.
 
 Usage:
-  python alignment/build_windows.py --min-score 0.15 --min-views-percentile 0.5
+  python training/alignment/build_windows.py --min-score 0.15 --min-views-percentile 0.5
 """
 
 import argparse
@@ -32,16 +32,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+TRAINING_ROOT = Path(__file__).resolve().parent.parent  # training/
+REPO_ROOT = TRAINING_ROOT.parent                          # true repo root
+sys.path.insert(0, str(REPO_ROOT))
 import config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MATCHES_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_clip_matches.json"
-SOURCES_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_sources_metadata.json"
-CLIPS_METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "tiktok_metadata.json"
-OUTPUT_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_windows_metadata.json"
+MATCHES_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_clip_matches.json"
+SOURCES_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_sources_metadata.json"
+CLIPS_METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "tiktok_metadata.json"
+OUTPUT_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_windows_metadata.json"
 
 WINDOW_DURATION = config.CLIP_DURATION_BEFORE + config.CLIP_DURATION_AFTER
 NEG_BUFFER_SECONDS = 60  # minimum gap between a negative window and any positive window

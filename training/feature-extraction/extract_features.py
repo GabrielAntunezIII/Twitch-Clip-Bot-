@@ -3,7 +3,7 @@ Downloads a sample of videos from the scraped dataset via yt-dlp and extracts
 audio-loudness-spike, scene-change, duration, and transcript/sentiment features
 for model training.
 
-Reads data-collection/dataset/metadata.json, samples videos round-robin across
+Reads training/data-collection/dataset/metadata.json, samples videos round-robin across
 channels (so the batch isn't dominated by whichever channel has the most
 records), downloads each with yt-dlp into <output_dir>/videos/, then runs
 ffmpeg/ffprobe/Whisper to compute:
@@ -19,7 +19,7 @@ and features.json, keyed by video_id so it can be joined back to
 metadata.json for labels (views/likes/etc).
 
 Usage:
-  python feature-extraction/extract_features.py --sample-size 25
+  python training/feature-extraction/extract_features.py --sample-size 25
 """
 
 import argparse
@@ -37,15 +37,16 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+TRAINING_ROOT = Path(__file__).resolve().parent.parent  # training/
+REPO_ROOT = TRAINING_ROOT.parent                          # true repo root
 sys.path.insert(0, str(REPO_ROOT))
 import config  # noqa: E402
 
-METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "metadata.json"
+METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "metadata.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "dataset"
 
 SCENE_CHANGE_THRESHOLD = 0.2  # ffmpeg 'scene' score cutoff for a cut/motion spike — see
-# feature-extraction/README.md for the 84-video sample that set this (0.4 zeroed ~45% of clips)
+# training/feature-extraction/README.md for the 84-video sample that set this (0.4 zeroed ~45% of clips)
 AUDIO_SPIKE_DB = 6.0          # minimum jump in momentary loudness to count as a spike
 
 # Hype keywords for spoken transcripts — adapted from bot/twitch/chat_monitor.py's
@@ -241,7 +242,7 @@ def main() -> None:
 
     metadata_path = Path(args.metadata_path)
     if not metadata_path.exists():
-        logger.error("No metadata found at %s — run data-collection/youtube_scraper.py or tiktok_scraper.py first", metadata_path)
+        logger.error("No metadata found at %s — run training/data-collection/youtube_scraper.py or tiktok_scraper.py first", metadata_path)
         sys.exit(1)
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

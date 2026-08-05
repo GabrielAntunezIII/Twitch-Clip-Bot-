@@ -5,13 +5,13 @@ extraction (no official API needed — yt-dlp scrapes the public profile page).
 Unlike youtube_scraper.py, view/like/comment/share counts come back directly
 from the flat-playlist listing itself, so no per-video follow-up request is
 needed. Results across profiles are merged (deduped by video_id) into
-data-collection/dataset/tiktok_metadata.csv and tiktok_metadata.json, so
+training/data-collection/dataset/tiktok_metadata.csv and tiktok_metadata.json, so
 repeated runs across different handles accumulate into the same dataset.
 
 Usage:
-  python data-collection/tiktok_scraper.py \\
+  python training/data-collection/tiktok_scraper.py \\
       --handles stoffer.edits \\
-      --output-dir data-collection/dataset \\
+      --output-dir training/data-collection/dataset \\
       --max-per-channel 500
 """
 
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import yt_dlp
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _write_outputs(records: list[TikTokVideoMetadata], output_dir: Path) -> None
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--handles", nargs="+", required=True, help="TikTok handles, without the @")
-    parser.add_argument("--output-dir", default="data-collection/dataset")
+    parser.add_argument("--output-dir", default="training/data-collection/dataset")
     parser.add_argument("--max-per-channel", type=int, default=500)
     args = parser.parse_args()
 

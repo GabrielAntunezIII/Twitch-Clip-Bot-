@@ -7,8 +7,9 @@ is happening based on chat reacting, double-checks that with an LLM so it's not 
 chasing spam, cuts the clip, reformats it for vertical video with captions burned in, and
 posts it to TikTok — no manual editing required.
 
-I'm also working on a second track in parallel (`data-collection/`, `alignment/`,
-`feature-extraction/`, `model-training/`) that trains an XGBoost model on how clips
+I'm also working on a second track in parallel (`training/data-collection/`,
+`training/alignment/`, `training/feature-extraction/`, `training/model-training/`) that
+trains an XGBoost model on how clips
 actually performed after posting, so I eventually have a data-driven second opinion
 running alongside the LLM's judgment instead of relying on the LLM alone.
 
@@ -41,14 +42,14 @@ running alongside the LLM's judgment instead of relying on the LLM alone.
 Instead of hand-labeling a bunch of clips myself, I'm deriving labels from how clips
 actually did after they were posted:
 
-- `data-collection/` pulls clip metadata (views, likes, publish date) from YouTube along
-  with the full-length source VODs
-- `alignment/` audio-fingerprints clips against their source VODs (FFT cross-correlation
-  on onset-strength envelopes) to find exactly where in the original stream each clip
-  came from
-- `feature-extraction/` turns each matched window into features - audio energy spikes,
-  scene-change counts, transcript keywords, sentiment (VADER)
-- `model-training/` trains an XGBoost classifier on those features, using each clip's
+- `training/data-collection/` pulls clip metadata (views, likes, publish date) from
+  YouTube along with the full-length source VODs
+- `training/alignment/` audio-fingerprints clips against their source VODs (FFT
+  cross-correlation on onset-strength envelopes) to find exactly where in the original
+  stream each clip came from
+- `training/feature-extraction/` turns each matched window into features - audio energy
+  spikes, scene-change counts, transcript keywords, sentiment (VADER)
+- `training/model-training/` trains an XGBoost classifier on those features, using each clip's
   view-count percentile within its own channel as the label (normalized by publish date,
   so newer clips aren't unfairly penalized for having less time to rack up views)
 

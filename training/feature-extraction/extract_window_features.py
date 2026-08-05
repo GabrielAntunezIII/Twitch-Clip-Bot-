@@ -1,7 +1,7 @@
 """
 Computes the same audio-spike/scene-change/transcript/sentiment features as
 extract_features.py, but for fixed-length WINDOWS of a source VOD (built by
-alignment/build_windows.py) rather than whole downloaded clips.
+training/alignment/build_windows.py) rather than whole downloaded clips.
 
 Reuses extract_features() / VideoFeatures from extract_features.py
 unchanged -- the only difference is how the .mp4 lands in videos_dir: here
@@ -9,7 +9,7 @@ it's a precise time-slice of a source video pulled via
 `yt-dlp --download-sections`, rather than the whole file.
 
 Usage:
-  python feature-extraction/extract_window_features.py --sample-size 300
+  python training/feature-extraction/extract_window_features.py --sample-size 300
 """
 
 import argparse
@@ -23,9 +23,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+TRAINING_ROOT = Path(__file__).resolve().parent.parent  # training/
+REPO_ROOT = TRAINING_ROOT.parent                          # true repo root
 sys.path.insert(0, str(REPO_ROOT))
-sys.path.insert(0, str(REPO_ROOT / "feature-extraction"))
+sys.path.insert(0, str(TRAINING_ROOT / "feature-extraction"))
 import config  # noqa: E402
 from dataclasses import asdict  # noqa: E402
 from extract_features import (  # noqa: E402
@@ -34,7 +35,7 @@ from extract_features import (  # noqa: E402
     extract_features,
 )
 
-WINDOWS_METADATA_PATH = REPO_ROOT / "data-collection" / "dataset" / "togi_windows_metadata.json"
+WINDOWS_METADATA_PATH = TRAINING_ROOT / "data-collection" / "dataset" / "togi_windows_metadata.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "dataset" / "togi_windows"
 
 
@@ -102,7 +103,7 @@ def main() -> None:
 
     windows_path = Path(args.windows_path)
     if not windows_path.exists():
-        logger.error("No windows metadata found at %s — run alignment/build_windows.py first", windows_path)
+        logger.error("No windows metadata found at %s — run training/alignment/build_windows.py first", windows_path)
         sys.exit(1)
 
     windows = json.loads(windows_path.read_text(encoding="utf-8"))
