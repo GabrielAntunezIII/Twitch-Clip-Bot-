@@ -148,7 +148,8 @@ activemq-data/
 *.sage.py
 
 # Environments
-.env
+.env*
+!.env.example
 .envrc
 .venv
 env/
@@ -217,3 +218,20 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 clips/
+
+# Trained-model pipeline artifacts (large binaries — don't check in)
+training/data-collection/dataset/
+training/feature-extraction/dataset/
+models/**/*.json
+models/**/*.txt
+models/**/*.pkl
+models/**/*.joblib
+training/alignment/cache/
+
+# Runtime artifacts & local credentials
+bot.log*
+tiktok_session.json
+.claude/settings.local.json
+
+# Local agent tooling config — not relevant to a public/recruiter-facing checkout
+CLAUDE.md
