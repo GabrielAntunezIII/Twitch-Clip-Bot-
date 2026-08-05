@@ -5,7 +5,7 @@ streams: the best moments are scattered across hours of VOD and nobody has time 
 find them. This bot watches a live Twitch stream, figures out when something clip-worthy
 is happening based on chat reacting, double-checks that with an LLM so it's not just
 chasing spam, cuts the clip, reformats it for vertical video with captions burned in, and
-posts it to TikTok — no manual editing required.
+posts it to TikTok no manual editing required.
 
 I'm also working on a second track in parallel (`training/data-collection/`,
 `training/alignment/`, `training/feature-extraction/`, `training/model-training/`) that
